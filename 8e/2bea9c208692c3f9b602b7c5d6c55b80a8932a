@@ -1,0 +1,21 @@
+src/renderer/src/store/slices/editor-close-file-stale-active.test.ts
+  s_f9e25f81f43fa9::t_adcc463a062195 67-90
+src/renderer/src/store/slices/editor/actions/close-file-action.ts
+  s_f9e25f81f43fa9::t_b486d0b6a8178b 12,207,209-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8e2bea9c208692c3f9b602b7c5d6c55b80a8932a",
+  "prompts": {},
+  "sessions": {
+    "s_f9e25f81f43fa9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10f08-16e4-7263-94e4-9d3181e271c9",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "AT <atxiesz@gmail.com>"
+    }
+  }
+}
