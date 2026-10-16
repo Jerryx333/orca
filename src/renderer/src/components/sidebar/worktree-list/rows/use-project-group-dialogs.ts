@@ -9,6 +9,7 @@ import {
   getRepoExecutionHostId,
   type ExecutionHostId
 } from '../../../../../../shared/execution-host'
+import type { CrossHostProjectGroupMerge } from '../grouping/cross-host-project-group-merge'
 
 export type ProjectGroupNameDialogState =
   | { type: 'create-from-repo'; repo: Repo }
@@ -21,6 +22,8 @@ export type ProjectGroupDeleteDialogState = {
   removeContainedProjects: boolean
   hostId?: ExecutionHostId
 }
+
+type ProjectGroupActionTarget = { groupId: string; hostId?: ExecutionHostId }
 
 export type ProjectGroupDialogs = ReturnType<typeof useProjectGroupDialogs>
 
@@ -69,8 +72,10 @@ export function useProjectGroupDialogs(args: {
   repos: readonly Repo[]
   repoMap: Map<string, Repo>
   projectGroups: readonly ProjectGroup[]
+  /** The sidebar's fold of same-named groups across hosts; a merged header's actions reach every member. */
+  projectGroupMerge?: CrossHostProjectGroupMerge
 }) {
-  const { repos, repoMap, projectGroups } = args
+  const { repos, repoMap, projectGroups, projectGroupMerge } = args
   const moveProjectToGroup = useAppStore((s) => s.moveProjectToGroup)
   const createProjectGroup = useAppStore((s) => s.createProjectGroup)
   const updateProjectGroup = useAppStore((s) => s.updateProjectGroup)
@@ -79,6 +84,18 @@ export function useProjectGroupDialogs(args: {
   )
   const [nameDialog, setNameDialog] = useState<ProjectGroupNameDialogState | null>(null)
   const [deleteDialog, setDeleteDialog] = useState<ProjectGroupDeleteDialogState | null>(null)
+
+  // Why every member: renaming or deleting only the header's own group would split
+  // the folded header back into one group per host.
+  const resolveGroupTargets = useCallback(
+    (groupId: string, hostId?: ExecutionHostId): ProjectGroupActionTarget[] => {
+      const members = projectGroupMerge?.membersByDisplayId.get(groupId)
+      return members && members.length > 1
+        ? members.map((member) => ({ groupId: member.id, hostId: getRepoExecutionHostId(member) }))
+        : [{ groupId, hostId }]
+    },
+    [projectGroupMerge]
+  )
 
   const handleCreateGroupFromRepo = useCallback((repo: Repo) => {
     setNameDialog({ type: 'create-from-repo', repo })
@@ -121,12 +138,12 @@ export function useProjectGroupDialogs(args: {
         }
         return
       }
-      const renamed = await updateProjectGroup(
-        nameDialog.groupId,
-        { name },
-        { hostId: nameDialog.hostId }
+      const renamed = await Promise.all(
+        resolveGroupTargets(nameDialog.groupId, nameDialog.hostId).map((target) =>
+          updateProjectGroup(target.groupId, { name }, { hostId: target.hostId })
+        )
       )
-      if (!renamed) {
+      if (renamed.some((confirmed) => !confirmed)) {
         toast.error(
           translate(
             'auto.components.sidebar.WorktreeList.groupRenameFailed',
@@ -142,20 +159,26 @@ export function useProjectGroupDialogs(args: {
         )
       }
     },
-    [createProjectGroup, moveProjectToGroup, nameDialog, updateProjectGroup]
+    [createProjectGroup, moveProjectToGroup, nameDialog, resolveGroupTargets, updateProjectGroup]
   )
 
   const deleteTargets = useMemo(() => {
     if (!deleteDialog) {
       return null
     }
-    return selectProjectGroupRemovalTargets(
-      projectGroups,
-      repos,
-      deleteDialog.groupId,
-      deleteDialog.hostId
-    )
-  }, [deleteDialog, projectGroups, repos])
+    const projectIds = new Set<string>()
+    for (const target of resolveGroupTargets(deleteDialog.groupId, deleteDialog.hostId)) {
+      for (const projectId of selectProjectGroupRemovalTargets(
+        projectGroups,
+        repos,
+        target.groupId,
+        target.hostId
+      ).projectIds) {
+        projectIds.add(projectId)
+      }
+    }
+    return { projectIds: [...projectIds] }
+  }, [deleteDialog, projectGroups, repos, resolveGroupTargets])
   const deleteProjectCount = deleteTargets?.projectIds.length ?? 0
   const deleteProjectNames = useMemo(
     () =>
@@ -179,17 +202,24 @@ export function useProjectGroupDialogs(args: {
       return
     }
     try {
-      reportProjectGroupDeleteFailures(
-        await deleteProjectGroupWithContainedProjects(deleteDialog.groupId, {
-          removeContainedProjects,
-          hostId: deleteDialog.hostId
-        })
-      )
+      for (const target of resolveGroupTargets(deleteDialog.groupId, deleteDialog.hostId)) {
+        reportProjectGroupDeleteFailures(
+          await deleteProjectGroupWithContainedProjects(target.groupId, {
+            removeContainedProjects,
+            hostId: target.hostId
+          })
+        )
+      }
     } finally {
       // Why: deleting contained projects can unmount this dialog before its close handler runs, so the parent owns cleanup.
       setDeleteDialog(null)
     }
-  }, [deleteProjectGroupWithContainedProjects, removeContainedProjects, deleteDialog])
+  }, [
+    deleteProjectGroupWithContainedProjects,
+    removeContainedProjects,
+    deleteDialog,
+    resolveGroupTargets
+  ])
 
   return {
     nameDialog,
