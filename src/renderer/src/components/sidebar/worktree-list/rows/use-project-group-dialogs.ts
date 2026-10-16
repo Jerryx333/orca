@@ -2,7 +2,11 @@ import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
-import { selectProjectGroupRemovalTargets } from '@/store/slices/project-group-removal-targets'
+import {
+  selectProjectGroupRemovalTargets,
+  type ProjectGroupRemovalProject
+} from '@/store/slices/project-group-removal-targets'
+import { getRepoHostIdentity, getRepoHostIdentityForParts } from '@/store/slices/repo-host-identity'
 import type { ProjectGroup } from '../../../../../../shared/project-group-types'
 import type { Repo } from '../../../../../../shared/repo-types'
 import {
@@ -70,12 +74,11 @@ function reportProjectGroupDeleteFailures(result: {
 // Create/rename/delete flows for project groups, including the contained-project fan-out.
 export function useProjectGroupDialogs(args: {
   repos: readonly Repo[]
-  repoMap: Map<string, Repo>
   projectGroups: readonly ProjectGroup[]
   /** The sidebar's fold of same-named groups across hosts; a merged header's actions reach every member. */
   projectGroupMerge?: CrossHostProjectGroupMerge
 }) {
-  const { repos, repoMap, projectGroups, projectGroupMerge } = args
+  const { repos, projectGroups, projectGroupMerge } = args
   const moveProjectToGroup = useAppStore((s) => s.moveProjectToGroup)
   const createProjectGroup = useAppStore((s) => s.createProjectGroup)
   const updateProjectGroup = useAppStore((s) => s.updateProjectGroup)
@@ -166,27 +169,29 @@ export function useProjectGroupDialogs(args: {
     if (!deleteDialog) {
       return null
     }
-    const projectIds = new Set<string>()
+    // Why (id, host): ids repeat across hosts, and a same-id row in each member group is two removals.
+    const projectsByHostIdentity = new Map<string, ProjectGroupRemovalProject>()
     for (const target of resolveGroupTargets(deleteDialog.groupId, deleteDialog.hostId)) {
-      for (const projectId of selectProjectGroupRemovalTargets(
+      for (const project of selectProjectGroupRemovalTargets(
         projectGroups,
         repos,
         target.groupId,
         target.hostId
-      ).projectIds) {
-        projectIds.add(projectId)
+      ).projects) {
+        projectsByHostIdentity.set(getRepoHostIdentityForParts(project.id, project.hostId), project)
       }
     }
-    return { projectIds: [...projectIds] }
+    return [...projectsByHostIdentity.values()]
   }, [deleteDialog, projectGroups, repos, resolveGroupTargets])
-  const deleteProjectCount = deleteTargets?.projectIds.length ?? 0
-  const deleteProjectNames = useMemo(
-    () =>
-      (deleteTargets?.projectIds ?? []).map(
-        (projectId) => repoMap.get(projectId)?.displayName ?? projectId
-      ),
-    [deleteTargets, repoMap]
-  )
+  const deleteProjectCount = deleteTargets?.length ?? 0
+  const deleteProjectNames = useMemo(() => {
+    const reposByHostIdentity = new Map(repos.map((repo) => [getRepoHostIdentity(repo), repo]))
+    return (deleteTargets ?? []).map(
+      (project) =>
+        reposByHostIdentity.get(getRepoHostIdentityForParts(project.id, project.hostId))
+          ?.displayName ?? project.id
+    )
+  }, [deleteTargets, repos])
   const removeContainedProjects =
     deleteProjectCount > 0 && deleteDialog?.removeContainedProjects === true
 

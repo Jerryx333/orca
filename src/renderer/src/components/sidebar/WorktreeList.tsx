@@ -174,7 +174,6 @@ const WorktreeList = React.memo(function WorktreeList({
   })
   const projectGroupDialogs = useProjectGroupDialogs({
     repos,
-    repoMap,
     projectGroups,
     projectGroupMerge: visibleScope.projectGroupMerge
   })

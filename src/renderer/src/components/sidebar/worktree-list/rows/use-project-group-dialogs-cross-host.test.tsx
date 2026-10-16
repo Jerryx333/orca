@@ -75,23 +75,22 @@ const projectGroupMerge = mergeProjectGroupsAcrossHosts(projectGroups, 'local')
 let latest: ProjectGroupDialogs | null = null
 const roots: Root[] = []
 
-function HookProbe(): null {
+function HookProbe({ probeRepos }: { probeRepos: readonly Repo[] }): null {
   latest = useProjectGroupDialogs({
-    repos,
-    repoMap: new Map(repos.map((repo) => [repo.id, repo])),
+    repos: probeRepos,
     projectGroups,
     projectGroupMerge
   })
   return null
 }
 
-async function renderHookProbe(): Promise<void> {
+async function renderHookProbe(probeRepos: readonly Repo[] = repos): Promise<void> {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   roots.push(root)
   await act(async () => {
-    root.render(<HookProbe />)
+    root.render(<HookProbe probeRepos={probeRepos} />)
   })
 }
 
@@ -176,6 +175,28 @@ describe('project group dialogs on a header merged across hosts', () => {
       removeContainedProjects: false,
       hostId: 'runtime:env-1'
     })
+  })
+
+  it('counts a repo id that both hosts carry once per host', async () => {
+    const sharedLocal: Repo = {
+      ...localRepo,
+      id: 'repo-shared',
+      path: '/Users/me/code/ai/tiller',
+      displayName: 'tiller'
+    }
+    const sharedRemote: Repo = {
+      ...remoteRepo,
+      id: 'repo-shared',
+      path: '/home/me/code/ai/tiller',
+      displayName: 'tiller (server)'
+    }
+    await renderHookProbe([localRepo, remoteRepo, sharedLocal, sharedRemote])
+    await act(async () => {
+      latest!.handleDeleteProjectGroup(localGroup.id, localGroup.name, 'local')
+    })
+
+    expect(latest!.deleteProjectCount).toBe(4)
+    expect(latest!.deleteProjectNames).toEqual(['orca', 'tiller', 'trading', 'tiller (server)'])
   })
 
   it('leaves an unmerged header on its single owner host', async () => {
